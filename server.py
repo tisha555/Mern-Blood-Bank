@@ -1,418 +1,308 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status
-from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
-import os
-import logging
-from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict, EmailStr
-from typing import List, Optional
-import uuid
-from datetime import datetime, timezone, timedelta
-from passlib.context import CryptContext
-import jwt
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import { useState, useEffect, useContext } from 'react';
+import { AuthContext } from '@/App';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Droplet, LogOut, Users, Heart, AlertCircle, TrendingUp, Activity, Award } from 'lucide-react';
+import axios from 'axios';
+import { toast } from 'sonner';
 
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
+const AdminDashboard = () => {
+  const { user, token, logout, API } = useContext(AuthContext);
+  const [stats, setStats] = useState(null);
+  const [requests, setRequests] = useState([]);
+  const [leaderboard, setLeaderboard] = useState([]);
+  const [activities, setActivities] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-# MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
-
-# JWT Configuration
-SECRET_KEY = os.environ.get('JWT_SECRET_KEY', 'your-secret-key-change-in-production')
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
-
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-security = HTTPBearer()
-
-# Create the main app without a prefix
-app = FastAPI()
-
-# Create a router with the /api prefix
-api_router = APIRouter(prefix="/api")
-
-# Models
-class UserBase(BaseModel):
-    email: EmailStr
-    name: str
-    phone: str
-    role: str  # donor, recipient, admin
-
-class UserRegister(UserBase):
-    password: str
-    blood_type: Optional[str] = None
-    location: Optional[str] = None
-
-class UserLogin(BaseModel):
-    email: EmailStr
-    password: str
-
-class User(UserBase):
-    model_config = ConfigDict(extra="ignore")
-    id: str
-    location: Optional[str] = None
-    created_at: str
-
-class TokenResponse(BaseModel):
-    access_token: str
-    token_type: str
-    user: User
-
-class DonorProfile(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str
-    user_id: str
-    blood_type: str
-    available: bool
-    last_donation_date: Optional[str] = None
-    location: str
-    name: str
-    phone: str
-    email: str
-
-class DonorCreate(BaseModel):
-    blood_type: str
-    available: bool = True
-    last_donation_date: Optional[str] = None
-
-class BloodRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str
-    recipient_id: str
-    recipient_name: str
-    recipient_phone: str
-    donor_id: Optional[str] = None
-    donor_name: Optional[str] = None
-    blood_type: str
-    location: str
-    urgency: str  # low, medium, high, critical
-    status: str  # pending, accepted, completed, cancelled
-    message: Optional[str] = None
-    created_at: str
-    updated_at: str
-
-class BloodRequestCreate(BaseModel):
-    donor_id: Optional[str] = None
-    blood_type: str
-    location: str
-    urgency: str
-    message: Optional[str] = None
-
-class BloodRequestUpdate(BaseModel):
-    status: str
-
-class DonorAvailabilityUpdate(BaseModel):
-    available: bool
-
-# Helper Functions
-def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
-
-def create_access_token(data: dict) -> str:
-    to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
-
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
-    try:
-        token = credentials.credentials
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: str = payload.get("sub")
-        if user_id is None:
-            raise HTTPException(status_code=401, detail="Invalid authentication credentials")
-        
-        user = await db.users.find_one({"id": user_id}, {"_id": 0})
-        if user is None:
-            raise HTTPException(status_code=401, detail="User not found")
-        return user
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token has expired")
-    except jwt.JWTError:
-        raise HTTPException(status_code=401, detail="Could not validate credentials")
-
-# Routes
-@api_router.post("/auth/register", response_model=TokenResponse)
-async def register(user_data: UserRegister):
-    # Check if user exists
-    existing_user = await db.users.find_one({"email": user_data.email})
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
-    
-    # Create user
-    user_id = str(uuid.uuid4())
-    user_doc = {
-        "id": user_id,
-        "email": user_data.email,
-        "name": user_data.name,
-        "phone": user_data.phone,
-        "role": user_data.role,
-        "location": user_data.location,
-        "password_hash": hash_password(user_data.password),
-        "created_at": datetime.now(timezone.utc).isoformat()
+  const fetchData = async () => {
+    try {
+      const headers = { Authorization: `Bearer ${token}` };
+      const [statsRes, requestsRes, leaderboardRes, activitiesRes] = await Promise.all([
+        axios.get(`${API}/stats`, { headers }),
+        axios.get(`${API}/blood-requests`, { headers }),
+        axios.get(`${API}/donors/leaderboard`, { headers }),
+        axios.get(`${API}/activities`, { headers })
+      ]);
+      
+      setStats(statsRes.data);
+      setRequests(requestsRes.data);
+      setLeaderboard(leaderboardRes.data);
+      setActivities(activitiesRes.data);
+    } catch (error) {
+      toast.error('Failed to load data');
+    } finally {
+      setLoading(false);
     }
-    await db.users.insert_one(user_doc)
-    
-    # If donor, create donor profile
-    if user_data.role == "donor" and user_data.blood_type:
-        donor_doc = {
-            "id": str(uuid.uuid4()),
-            "user_id": user_id,
-            "blood_type": user_data.blood_type,
-            "available": True,
-            "last_donation_date": None,
-            "created_at": datetime.now(timezone.utc).isoformat()
-        }
-        await db.donors.insert_one(donor_doc)
-    
-    # Create token
-    access_token = create_access_token(data={"sub": user_id})
-    
-    user_response = User(
-        id=user_id,
-        email=user_data.email,
-        name=user_data.name,
-        phone=user_data.phone,
-        role=user_data.role,
-        location=user_data.location,
-        created_at=user_doc["created_at"]
-    )
-    
-    return TokenResponse(
-        access_token=access_token,
-        token_type="bearer",
-        user=user_response
-    )
+  };
 
-@api_router.post("/auth/login", response_model=TokenResponse)
-async def login(credentials: UserLogin):
-    user = await db.users.find_one({"email": credentials.email}, {"_id": 0})
-    if not user or not verify_password(credentials.password, user["password_hash"]):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-    
-    access_token = create_access_token(data={"sub": user["id"]})
-    
-    user_response = User(
-        id=user["id"],
-        email=user["email"],
-        name=user["name"],
-        phone=user["phone"],
-        role=user["role"],
-        location=user.get("location"),
-        created_at=user["created_at"]
-    )
-    
-    return TokenResponse(
-        access_token=access_token,
-        token_type="bearer",
-        user=user_response
-    )
+  useEffect(() => {
+    fetchData();
+  }, []);
 
-@api_router.get("/profile", response_model=User)
-async def get_profile(current_user: dict = Depends(get_current_user)):
-    return User(
-        id=current_user["id"],
-        email=current_user["email"],
-        name=current_user["name"],
-        phone=current_user["phone"],
-        role=current_user["role"],
-        location=current_user.get("location"),
-        created_at=current_user["created_at"]
-    )
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="spinner"></div>
+      </div>
+    );
+  }
 
-@api_router.get("/donors", response_model=List[DonorProfile])
-async def get_donors(blood_type: Optional[str] = None, location: Optional[str] = None, available: Optional[bool] = None):
-    query = {}
-    if available is not None:
-        query["available"] = available
-    if blood_type:
-        query["blood_type"] = blood_type
-    
-    donors = await db.donors.find(query, {"_id": 0}).to_list(1000)
-    
-    # Enrich with user data
-    result = []
-    for donor in donors:
-        user = await db.users.find_one({"id": donor["user_id"]}, {"_id": 0})
-        if user:
-            # Filter by location if specified
-            if location and location.lower() not in user.get("location", "").lower():
-                continue
-            
-            result.append(DonorProfile(
-                id=donor["id"],
-                user_id=donor["user_id"],
-                blood_type=donor["blood_type"],
-                available=donor["available"],
-                last_donation_date=donor.get("last_donation_date"),
-                location=user.get("location", ""),
-                name=user["name"],
-                phone=user["phone"],
-                email=user["email"]
-            ))
-    
-    return result
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-teal-50 via-cyan-50 to-blue-50">
+      {/* Header */}
+      <header className="bg-white shadow-sm border-b border-gray-200">
+        <div className="container mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 bg-teal-600 rounded-xl flex items-center justify-center">
+                <Droplet className="w-6 h-6 text-white" fill="white" />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold text-gray-900">LifeFlow</h1>
+                <p className="text-sm text-gray-600">Admin Dashboard</p>
+              </div>
+            </div>
+            <Button 
+              data-testid="logout-btn"
+              onClick={logout} 
+              variant="outline" 
+              className="border-gray-300 hover:bg-gray-50"
+            >
+              <LogOut className="w-4 h-4 mr-2" />
+              Logout
+            </Button>
+          </div>
+        </div>
+      </header>
 
-@api_router.get("/donors/me", response_model=DonorProfile)
-async def get_my_donor_profile(current_user: dict = Depends(get_current_user)):
-    if current_user["role"] != "donor":
-        raise HTTPException(status_code=403, detail="Only donors can access this endpoint")
-    
-    donor = await db.donors.find_one({"user_id": current_user["id"]}, {"_id": 0})
-    if not donor:
-        raise HTTPException(status_code=404, detail="Donor profile not found")
-    
-    return DonorProfile(
-        id=donor["id"],
-        user_id=donor["user_id"],
-        blood_type=donor["blood_type"],
-        available=donor["available"],
-        last_donation_date=donor.get("last_donation_date"),
-        location=current_user.get("location", ""),
-        name=current_user["name"],
-        phone=current_user["phone"],
-        email=current_user["email"]
-    )
+      <div className="container mx-auto px-6 py-8">
+        {/* Welcome Section */}
+        <div className="mb-8 animate-fade-in">
+          <h2 className="text-3xl font-bold text-gray-900 mb-2">Welcome, {user?.name}!</h2>
+          <p className="text-gray-600">System overview and analytics</p>
+        </div>
 
-@api_router.put("/donors/me/availability")
-async def update_donor_availability(update: DonorAvailabilityUpdate, current_user: dict = Depends(get_current_user)):
-    if current_user["role"] != "donor":
-        raise HTTPException(status_code=403, detail="Only donors can access this endpoint")
-    
-    result = await db.donors.update_one(
-        {"user_id": current_user["id"]},
-        {"$set": {"available": update.available}}
-    )
-    
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Donor profile not found")
-    
-    return {"message": "Availability updated successfully", "available": update.available}
+        {/* Stats Grid */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-8">
+          <Card className="shadow-lg border-0 card-hover">
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600 mb-1">Total Donors</p>
+                  <p className="text-3xl font-bold text-gray-900">{stats?.total_donors || 0}</p>
+                </div>
+                <div className="w-12 h-12 bg-teal-100 rounded-xl flex items-center justify-center">
+                  <Users className="w-6 h-6 text-teal-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
-@api_router.post("/blood-requests", response_model=BloodRequest)
-async def create_blood_request(request_data: BloodRequestCreate, current_user: dict = Depends(get_current_user)):
-    if current_user["role"] != "recipient":
-        raise HTTPException(status_code=403, detail="Only recipients can create blood requests")
-    
-    request_id = str(uuid.uuid4())
-    donor_name = None
-    
-    if request_data.donor_id:
-        donor = await db.donors.find_one({"id": request_data.donor_id}, {"_id": 0})
-        if donor:
-            donor_user = await db.users.find_one({"id": donor["user_id"]}, {"_id": 0})
-            donor_name = donor_user["name"] if donor_user else None
-    
-    request_doc = {
-        "id": request_id,
-        "recipient_id": current_user["id"],
-        "recipient_name": current_user["name"],
-        "recipient_phone": current_user["phone"],
-        "donor_id": request_data.donor_id,
-        "donor_name": donor_name,
-        "blood_type": request_data.blood_type,
-        "location": request_data.location,
-        "urgency": request_data.urgency,
-        "status": "pending",
-        "message": request_data.message,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "updated_at": datetime.now(timezone.utc).isoformat()
-    }
-    
-    await db.blood_requests.insert_one(request_doc)
-    
-    return BloodRequest(**request_doc)
+          <Card className="shadow-lg border-0 card-hover">
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600 mb-1">Available</p>
+                  <p className="text-3xl font-bold text-green-600">{stats?.available_donors || 0}</p>
+                </div>
+                <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center">
+                  <Heart className="w-6 h-6 text-green-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
-@api_router.get("/blood-requests", response_model=List[BloodRequest])
-async def get_blood_requests(current_user: dict = Depends(get_current_user)):
-    if current_user["role"] == "donor":
-        # Get donor profile
-        donor = await db.donors.find_one({"user_id": current_user["id"]}, {"_id": 0})
-        if not donor:
-            return []
-        
-        # Get requests for this donor or matching blood type
-        requests = await db.blood_requests.find({
-            "$or": [
-                {"donor_id": donor["id"]},
-                {"blood_type": donor["blood_type"], "status": "pending"}
-            ]
-        }, {"_id": 0}).to_list(1000)
-    elif current_user["role"] == "recipient":
-        # Get requests created by this recipient
-        requests = await db.blood_requests.find(
-            {"recipient_id": current_user["id"]},
-            {"_id": 0}
-        ).to_list(1000)
-    else:
-        # Admin - get all requests
-        requests = await db.blood_requests.find({}, {"_id": 0}).to_list(1000)
-    
-    return [BloodRequest(**req) for req in requests]
+          <Card className="shadow-lg border-0 card-hover">
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600 mb-1">Pending Requests</p>
+                  <p className="text-3xl font-bold text-amber-600">{stats?.pending_requests || 0}</p>
+                </div>
+                <div className="w-12 h-12 bg-amber-100 rounded-xl flex items-center justify-center">
+                  <AlertCircle className="w-6 h-6 text-amber-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
-@api_router.put("/blood-requests/{request_id}")
-async def update_blood_request(request_id: str, update: BloodRequestUpdate, current_user: dict = Depends(get_current_user)):
-    request = await db.blood_requests.find_one({"id": request_id}, {"_id": 0})
-    if not request:
-        raise HTTPException(status_code=404, detail="Request not found")
-    
-    # Authorization check
-    if current_user["role"] == "recipient" and request["recipient_id"] != current_user["id"]:
-        raise HTTPException(status_code=403, detail="Not authorized to update this request")
-    
-    result = await db.blood_requests.update_one(
-        {"id": request_id},
-        {"$set": {"status": update.status, "updated_at": datetime.now(timezone.utc).isoformat()}}
-    )
-    
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Request not found")
-    
-    return {"message": "Request updated successfully", "status": update.status}
+          <Card className="shadow-lg border-0 card-hover">
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600 mb-1">Total Donations</p>
+                  <p className="text-3xl font-bold text-blue-600">{stats?.total_donations || 0}</p>
+                </div>
+                <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center">
+                  <TrendingUp className="w-6 h-6 text-blue-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
 
-@api_router.get("/stats")
-async def get_stats():
-    total_donors = await db.donors.count_documents({})
-    available_donors = await db.donors.count_documents({"available": True})
-    total_requests = await db.blood_requests.count_documents({})
-    pending_requests = await db.blood_requests.count_documents({"status": "pending"})
-    completed_requests = await db.blood_requests.count_documents({"status": "completed"})
-    
-    return {
-        "total_donors": total_donors,
-        "available_donors": available_donors,
-        "total_requests": total_requests,
-        "pending_requests": pending_requests,
-        "completed_requests": completed_requests
-    }
+        {/* Emergency Alert */}
+        {stats?.emergency_requests > 0 && (
+          <Card className="shadow-lg border-2 border-red-500 bg-red-50 mb-8">
+            <CardContent className="pt-6">
+              <div className="flex items-center">
+                <AlertCircle className="w-8 h-8 text-red-600 mr-4" />
+                <div>
+                  <h3 className="text-xl font-bold text-red-900 mb-1">🚨 Emergency Alert</h3>
+                  <p className="text-red-700">{stats.emergency_requests} emergency blood request(s) require immediate attention!</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
-# Include the router in the main app
-app.include_router(api_router)
+        <div className="grid lg:grid-cols-3 gap-6">
+          {/* Main Content - Tabs */}
+          <div className="lg:col-span-2">
+            <Card className="shadow-lg border-0">
+              <Tabs defaultValue="requests" className="w-full">
+                <CardHeader className="border-b border-gray-200">
+                  <TabsList className="grid w-full grid-cols-3">
+                    <TabsTrigger value="requests">All Requests</TabsTrigger>
+                    <TabsTrigger value="blood-types">Blood Types</TabsTrigger>
+                    <TabsTrigger value="leaderboard">Leaderboard</TabsTrigger>
+                  </TabsList>
+                </CardHeader>
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+                <TabsContent value="requests" className="p-6">
+                  <div className="space-y-4">
+                    {requests.length === 0 ? (
+                      <p className="text-center text-gray-500 py-8">No requests found</p>
+                    ) : (
+                      requests.slice(0, 10).map((request) => (
+                        <div 
+                          key={request.id} 
+                          className={`p-4 rounded-xl border-2 ${
+                            request.is_emergency ? 'border-red-500 bg-red-50' :
+                            request.status === 'pending' ? 'border-amber-200 bg-amber-50' :
+                            'border-gray-200 bg-white'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between mb-2">
+                            <div>
+                              <h4 className="font-bold text-gray-900">{request.recipient_name}</h4>
+                              <p className="text-sm text-gray-600">{request.location}</p>
+                            </div>
+                            <div className="flex gap-2">
+                              <Badge className="bg-red-100 text-red-700">
+                                {request.blood_type}
+                              </Badge>
+                              <Badge className={`${
+                                request.status === 'pending' ? 'bg-amber-600' :
+                                request.status === 'completed' ? 'bg-green-600' :
+                                'bg-gray-600'
+                              } text-white`}>
+                                {request.status}
+                              </Badge>
+                            </div>
+                          </div>
+                          {request.is_emergency && (
+                            <Badge className="bg-red-600 text-white">🚨 EMERGENCY</Badge>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </TabsContent>
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+                <TabsContent value="blood-types" className="p-6">
+                  <div className="space-y-4">
+                    {stats?.blood_type_distribution?.map((item) => (
+                      <div key={item._id} className="flex items-center justify-between p-4 bg-white rounded-xl border border-gray-200">
+                        <div className="flex items-center gap-3">
+                          <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+                            <span className="font-bold text-red-600">{item._id}</span>
+                          </div>
+                          <span className="font-semibold text-gray-900">Blood Type {item._id}</span>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-2xl font-bold text-gray-900">{item.count}</p>
+                          <p className="text-sm text-gray-600">donors</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </TabsContent>
 
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()
+                <TabsContent value="leaderboard" className="p-6">
+                  <div className="space-y-4">
+                    {leaderboard.map((donor, index) => (
+                      <div 
+                        key={donor.id} 
+                        className="flex items-center gap-4 p-4 bg-white rounded-xl border border-gray-200 hover:shadow-md transition-shadow"
+                      >
+                        <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-white ${
+                          index === 0 ? 'bg-yellow-500' :
+                          index === 1 ? 'bg-gray-400' :
+                          index === 2 ? 'bg-amber-700' :
+                          'bg-teal-600'
+                        }`}>
+                          {index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : index + 1}
+                        </div>
+                        <div className="flex-1">
+                          <h4 className="font-bold text-gray-900">{donor.name}</h4>
+                          <div className="flex gap-2 mt-1">
+                            <Badge className="bg-red-100 text-red-700">{donor.blood_type}</Badge>
+                            {donor.achievements.length > 0 && (
+                              <Badge className="bg-teal-100 text-teal-700">
+                                {donor.achievements[donor.achievements.length - 1]}
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-2xl font-bold text-teal-600">{donor.total_donations}</p>
+                          <p className="text-sm text-gray-600">donations</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </TabsContent>
+              </Tabs>
+            </Card>
+          </div>
+
+          {/* Sidebar - Activity Feed */}
+          <div className="lg:col-span-1">
+            <Card className="shadow-lg border-0 sticky top-6">
+              <CardHeader className="border-b border-gray-200">
+                <CardTitle className="flex items-center">
+                  <Activity className="w-5 h-5 mr-2 text-teal-600" />
+                  Recent Activity
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-6">
+                <div className="space-y-4 max-h-[600px] overflow-y-auto">
+                  {activities.map((activity) => (
+                    <div key={activity.id} className="flex gap-3">
+                      <div className={`w-2 h-2 rounded-full mt-2 ${
+                        activity.type === 'donation' ? 'bg-green-500' :
+                        activity.type === 'request' ? 'bg-amber-500' :
+                        'bg-blue-500'
+                      }`}></div>
+                      <div className="flex-1">
+                        <p className="text-sm text-gray-900">{activity.message}</p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          {activity.user_name} • {new Date(activity.timestamp).toLocaleString()}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default AdminDashboard;
