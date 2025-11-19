@@ -58,10 +58,7 @@ Ensure you have the following installed on your system:
 - *MongoDB / MySQL* (whichever you used)  
 - *Git*  
 
-### 🔹 Clone the Repository  
-bash
-git clone https://github.com/yourusername/blood-bank-system.git
-cd blood-bank-system
+
 
 
 ### 🔹 Backend Setup  
@@ -106,7 +103,7 @@ cd blood-bank-system
    bash
    npm start
    
-   The React app should now be running on http://localhost:3000.
+   The React app should now be running on https://red-bridge-1.preview.emergentagent.com/
 
 ### 🔹 Database Setup  
 #### MongoDB Setup (if using MongoDB)  
