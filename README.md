@@ -84,7 +84,6 @@ Ensure you have the following installed on your system:
    bash
    npm start
    
-   The server should now be running on http://localhost:5000.
 
 ### 🔹 Frontend Setup  
 1. Navigate to the frontend folder:  
@@ -97,7 +96,7 @@ Ensure you have the following installed on your system:
    
 3. Create a .env file in the client folder and add:  
    env
-   REACT_APP_API_URL=http://localhost:5000
+   
    
 4. Start the frontend:  
    bash
